@@ -456,13 +456,16 @@ def apply_subst_to_type(ty: Type, subst: Subst) -> Type:
     elif isinstance(ty, BoolType):
         return BoolType()
     elif isinstance(ty, ProcType):
-        return ProcType(apply_subst_to_type(ty.arg_type, subst),
-                        apply_subst_to_type(ty.result_type, subst))
+        arg_type = apply_subst_to_type(ty.arg_type, subst)
+        result_type = apply_subst_to_type(ty.result_type, subst)
+        return ProcType(arg_type, result_type)
     elif isinstance(ty, VarType):
         if ty.sn in subst:
             return subst[ty.sn]
         else:
             return ty
+    else:
+        raise Exception("forbidden")
 
 
 def same_type(ty1: Type, ty2: Type):
@@ -548,7 +551,7 @@ def type_of(exp: Exp, tenv: TEnv, subst: Subst) -> (Type, Subst):
         s1 = unifier(t1, IntType(), s1, exp.exp1)
         t2, s2 = type_of(exp.exp2, tenv, s1)
         s2 = unifier(t1, IntType(), s2, exp.exp2)
-        return IntType, s2
+        return IntType(), s2
     if isinstance(exp, IsZeroExp):
         t1, s1 = type_of(exp.exp, tenv, subst)
         s2 = unifier(t1, IntType(), s1, exp)
@@ -615,14 +618,21 @@ def check_type(prog):
 # this will return ProcType(VarType, IntType), but the x should be Int, why it does not return
 # ProcType(IntType, IntType) ?
 check_type("""
-let f = proc (z) z 
+let f = proc (z) z
 in proc (x) -((f x), 1)
 """)
 
 
 # when you apply g with a bool, the program will not type check, this is ok
 check_type("""
-let f = proc (z) z 
+let f = proc (z) z
 in let g = proc (x) -((f x), 1)
     in (g zero?(1))
+""")
+
+# this will type check, but the type_of is var type, it's wiered
+check_type("""
+let f = proc (z) z 
+in let g = proc (x) -((f x), 1)
+    in (g 1)
 """)
