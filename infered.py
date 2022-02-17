@@ -561,8 +561,9 @@ def type_of(exp: Exp, tenv: TEnv, subst: Subst) -> (Type, Subst):
         subst = unifier(t2, t3, subst, exp)
         return t3, subst
     if isinstance(exp, LetExp):
-        t_var, subst1 = type_of(exp.exp1, tenv, subst)
-        return type_of(exp.body, TExtendEnv(exp.name, t_var, tenv), subst)
+        t_var, subst = type_of(exp.exp1, tenv, subst)
+        t_body, subst = type_of(exp.body, TExtendEnv(exp.name, t_var, tenv), subst)
+        return t_body, subst
     if isinstance(exp, ProcExp):
         var_type = fresh_var_type()
         body_type, subst = type_of(exp.body, TExtendEnv(exp.var, var_type, tenv), subst)
@@ -579,7 +580,7 @@ def type_of(exp: Exp, tenv: TEnv, subst: Subst) -> (Type, Subst):
         # TODO
         raise Exception("TODO:")
 
-    
+
 def run(prog):
     parser = Parser(Lexer(prog))
     exp = parser.parse_exp()
@@ -611,6 +612,17 @@ def check_type(prog):
     print(t)
 
 
+# this will return ProcType(VarType, IntType), but the x should be Int, why it does not return
+# ProcType(IntType, IntType) ?
 check_type("""
-let f = proc (z) z in proc (x) -((f x), 1)
+let f = proc (z) z 
+in proc (x) -((f x), 1)
+""")
+
+
+# when you apply g with a bool, the program will not type check, this is ok
+check_type("""
+let f = proc (z) z 
+in let g = proc (x) -((f x), 1)
+    in (g zero?(1))
 """)
