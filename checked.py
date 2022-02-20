@@ -565,28 +565,47 @@ evaluated to:
 def type_check(prog):
     parser = Parser(Lexer(prog))
     exp = parser.parse_prog()
-    type_value = type_of(exp, TEmptyEnv())
-    text = """
+    try:
+        type_value = type_of(exp, TEmptyEnv())
+        text = """
 the program:
 ---
 {0}
 ---
 is type checked
-    """.format(prog)
-    print(text)
-
+        """.format(prog)
+        print(text)
+    except Exception as e:
+        text = """
+the program:
+---
+{0}
+---
+is not type checked
+                """.format(prog)
+        print(text)
 
 def type_check_and_run(prog):
     type_check(prog)
     run(prog)
 
-
-type_check_and_run("""
+# success
+type_check("""
 letrec int f(n:int) = 
         if zero?(n) 
         then 0 
         else -((f -(n, 1)), -(0, n)) 
 in (f 10)
 """)
+
+# fail
+type_check("""
+letrec int f(n:int) = 
+        if zero?(n) 
+        then 0 
+        else -((f -(n, 1)), -(0, n)) 
+in (f zero?(0))
+""")
+
 
 
