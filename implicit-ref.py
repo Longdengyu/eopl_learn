@@ -419,7 +419,7 @@ def get_store():
     return g_store
 
 
-def new_ref(value) -> int:
+def new_ref(value) -> RefVal:
     the_store = get_store()
     next_index = len(the_store)
     the_store.append(value)
@@ -485,10 +485,22 @@ def evaluate(exp: Exp, env: Env) -> ExpVal:
         set_ref(ref, v1)
 
 
-# tokens = list(tokenize("proc"))
-# print(tokens)
+def run(prog):
+    parser = Parser(Lexer(prog))
+    exp = parser.parse()
 
-parser = Parser(Lexer("""
+    text = """
+the program:
+---
+{0}
+---
+evaluated to:
+{1}
+    """.format(prog, evaluate(exp, init_env()))
+    print(text)
+
+run(
+    """
 let num = 0 in
 letrec f(n) =    if zero?(n) 
                     then num
@@ -498,8 +510,5 @@ letrec f(n) =    if zero?(n)
                             (f, -(n, 1))
                         end    
 in (f, 10)    
-"""))
-
-exp = parser.parse_exp()
-# print(exp)
-print(evaluate(exp, init_env()))
+    """
+)
