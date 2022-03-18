@@ -231,6 +231,8 @@ token_exprs = [
     (r'in',                  RESERVED),
     (r'module',                  RESERVED),
     (r'body',                  RESERVED),
+    (r'from',                  RESERVED),
+    (r'take',                  RESERVED),
     # (r'while',                 RESERVED),
     # (r'do',                    RESERVED),
     # (r'end',                   RESERVED),
@@ -338,9 +340,13 @@ def dumpAst(ast: AbsExp):
             return dumpModuleBody(ast, align_length)
         elif isinstance(ast, Defn):
             return dumpDefn(ast, align_length)
+        elif isinstance(ast, FromExp):
+            return dumpFromExp(ast, align_length)
         else:
             raise Exception("not expected")
-        
+    def dumpFromExp(ast: FromExp, align_length):
+        return "FromExp:({}, {})".format(ast.m_name, ast.m_var)
+    
     def dumpConstExp(expr: ConstExp, align_length):
       return """ConstExp: {}""".format(expr.num)
     
@@ -413,7 +419,7 @@ def parser():
     return Phrase(programP())    
 
 def exprP():
-    return constP() | varP() | letP() | zeroP() | ifP()
+    return constP() | varP() | letP() | zeroP() | ifP() | fromP()
 
 def varP():
     debug("var")
@@ -447,6 +453,19 @@ def ifP():
         (((((_,a),_),b),_),c) = parsed
         return IfExp(a, b, c)
     return keyword("if") + Lazy(exprP) + keyword("then") + Lazy(exprP) + keyword("else") + Lazy(exprP) ^ process
+
+class FromExp(AbsExp):
+    def __init__(self, m_name, m_var):
+        self.m_name = m_name
+        self.m_var = m_var
+        
+def fromP():
+    def process(parsed):
+        (((m1, module_name), m3), export_varname) = parsed
+        return FromExp(module_name, export_varname)         
+
+    return keyword("from") + id + keyword("take") + id ^ process
+    
 
 def moduleP():
     def process(parsed):
@@ -558,21 +577,32 @@ def test():
     # tokens = let_lex("let a = if 1 then 2 else 3 in let b = 3 in zero?(1)")
     # tokens = let_lex("zero?(1)")
     # tokens = let_lex("if a then b else c")
-    tokens = let_lex('''
-                     module m1
-                     interface [a b c]
-                     body [
-                         x = zero?(let a = 1 in b)
-                         y = 2
+    # tokens = let_lex('''
+    #                  module m1
+    #                  interface [a b c]
+    #                  body [
+    #                      x = zero?(let a = 1 in b)
+    #                      y = 2
+    #                  ]
+    #                  module m2
+    #                  interface [x y z]
+    #                  body [
+    #                      a = b
+    #                      c = d
+    #                  ]
+    #                  1
+    #                  ''')
+    
+    tokens = let_lex("""
+                     module m1 
+                     interface [
+                         num
                      ]
-                     module m2
-                     interface [x y z]
                      body [
-                         a = b
-                         c = d
+                         num = 1
                      ]
-                     1
-                     ''')
+                     from m1 take num
+                     """)
     # tokens = let_lex('''
     #                 1
     #                 ''')
