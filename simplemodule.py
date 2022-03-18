@@ -336,6 +336,8 @@ def dumpAst(ast: AbsExp):
             return dumpModule(ast, align_length)
         elif isinstance(ast, ModuleBody):
             return dumpModuleBody(ast, align_length)
+        elif isinstance(ast, Defn):
+            return dumpDefn(ast, align_length)
         else:
             raise Exception("not expected")
         
@@ -377,7 +379,14 @@ def dumpAst(ast: AbsExp):
     """.format(align_length * '  ', module.name, ",".join(module.interface.names), dumpAst_(module.body, align_length + 1))
     
     def dumpModuleBody(moduleBody, align_length):
-        return """TODO:"""
+        str_defns = map((lambda defn: dumpAst_(defn, align_length + 2)), moduleBody.defns)
+        return "\n".join(str_defns)
+    
+    def dumpDefn(defn, align_length):
+        return """
+    {0}name:{1} 
+    {0}exp:{2}
+    """.format(align_length * '  ', defn.name, dumpAst_(defn.exp, align_length + 1))
     
     def dumpIfExp(expr: IfExp, align_length):
         return """
@@ -552,10 +561,16 @@ def test():
     tokens = let_lex('''
                      module m1
                      interface [a b c]
-                     body []
+                     body [
+                         x = zero?(let a = 1 in b)
+                         y = 2
+                     ]
                      module m2
                      interface [x y z]
-                     body []
+                     body [
+                         a = b
+                         c = d
+                     ]
                      1
                      ''')
     # tokens = let_lex('''
