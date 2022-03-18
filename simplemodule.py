@@ -204,6 +204,10 @@ token_exprs = [
     # (r'\:=',                   RESERVED),
     (r'\(',                    RESERVED),
     (r'\)',                    RESERVED),
+    (r'\[',                    RESERVED),
+    (r'\]',                    RESERVED),
+    (r'\{',                    RESERVED),
+    (r'\}',                    RESERVED),
     # (r';',                     RESERVED),
     # (r'\+',                    RESERVED),
     # (r'-',                     RESERVED),
@@ -223,7 +227,10 @@ token_exprs = [
     (r'then',                  RESERVED),
     (r'else',                  RESERVED),
     (r'let',                  RESERVED),
+    (r'interface',                  RESERVED),
     (r'in',                  RESERVED),
+    (r'module',                  RESERVED),
+    (r'body',                  RESERVED),
     # (r'while',                 RESERVED),
     # (r'do',                    RESERVED),
     # (r'end',                   RESERVED),
@@ -275,7 +282,6 @@ class ConstExp(AbsExp):
     # def __str__(self):
     #     return "ConstExp: {}".format(self.num)
 
-
 class ZeroExp(AbsExp):
     def __init__(self, exp1):
         self.exp1 = exp1
@@ -286,8 +292,32 @@ class IfExp(AbsExp):
         self.pred = pred 
         self.true_body = true_body
         self.false_body = false_body
-        
 
+class Program:
+    def __init__(self, modules, body):
+        self.modules = modules
+        self.body = body 
+
+class Module:
+    def __init__(self, name, interface, body):
+        self.name = name 
+        self.interface = interface 
+        self.body = body 
+
+class ModuleInterface:
+    def __init__(self,names):
+        self.names = names
+
+class ModuleBody:
+    def __init__(self, defns):
+        self.defns = defns 
+
+class Defn:
+    def __init__(self, name, exp):
+        self.name = name 
+        self.exp = exp
+
+# helper function for ast
 def dumpAst(ast: AbsExp):
     def dumpAst_(ast: AbsExp, align_length):
         if isinstance(ast, ConstExp):
@@ -300,6 +330,12 @@ def dumpAst(ast: AbsExp):
             return  dumpZeroExp(ast, align_length)
         elif isinstance(ast, IfExp):
             return dumpIfExp(ast, align_length)
+        elif isinstance(ast, Program):
+            return dumpProgram(ast, align_length)
+        elif isinstance(ast, Module):
+            return dumpModule(ast, align_length)
+        elif isinstance(ast, ModuleBody):
+            return dumpModuleBody(ast, align_length)
         else:
             raise Exception("not expected")
         
@@ -311,7 +347,7 @@ def dumpAst(ast: AbsExp):
 
     def dumpZeroExp(expr: ZeroExp, align_length):
         return """
-    {0}ZeroExp: {1}""".format(align_length * '\t', dumpAst_(expr.exp1, align_length + 1))
+    {0}ZeroExp: {1}""".format(align_length * '  ', dumpAst_(expr.exp1, align_length + 1))
     
     def dumpLetExp(expr: LetExp, align_length):
         return """
@@ -319,10 +355,29 @@ def dumpAst(ast: AbsExp):
     {0}  bound_var: {1}
     {0}  bind_exp: {2}
     {0}  body: {3}
-    """.format(align_length * '\t', 
+    """.format(align_length * '  ', 
                expr.bound_var, 
                dumpAst_(expr.bind_exp, align_length + 1), 
                dumpAst_(expr.body, align_length + 1))
+    
+    def dumpProgram(prog, align_length):
+        str_modules = map((lambda m: dumpAst_(m, align_length + 3)), prog.modules)
+        return """
+    {0}Program:
+    {0}    modules:{1}
+    {0}    program_body:{2}
+    """.format(align_length * '  ', '\n'.join(str_modules), dumpAst_(prog.body, align_length + 1)
+            )
+    def dumpModule(module: Module, align_length):
+        return """
+    {0}Module:
+    {0} name: {1}
+    {0} interfaces: {2}
+    {0} module_body: {3}
+    """.format(align_length * '  ', module.name, ",".join(module.interface.names), dumpAst_(module.body, align_length + 1))
+    
+    def dumpModuleBody(moduleBody, align_length):
+        return """TODO:"""
     
     def dumpIfExp(expr: IfExp, align_length):
         return """
@@ -330,12 +385,14 @@ def dumpAst(ast: AbsExp):
     {0}pred:{1}
     {0}true_body:{2}
     {0}false_body:{3}
-    """.format(align_length * '\t',
+    """.format(align_length * '  ',
                dumpAst_(expr.pred, align_length + 1),
                dumpAst_(expr.true_body, align_length + 1),
                dumpAst_(expr.false_body, align_length + 1))
     return dumpAst_(ast, 0)
-   
+
+
+# build parser using the combinator
 # Top level parser
 def let_parse(tokens):
     result = parser()(tokens, 0)
@@ -343,7 +400,8 @@ def let_parse(tokens):
     return ast
 
 def parser():
-    return Phrase(exprP())    
+    # return Phrase(exprP())    
+    return Phrase(programP())    
 
 def exprP():
     return constP() | varP() | letP() | zeroP() | ifP()
@@ -381,13 +439,145 @@ def ifP():
         return IfExp(a, b, c)
     return keyword("if") + Lazy(exprP) + keyword("then") + Lazy(exprP) + keyword("else") + Lazy(exprP) ^ process
 
+def moduleP():
+    def process(parsed):
+        debug("process moduleP")
+        (((((((((m1,m2),m3),m4),interface_names),m6),m7),m8),module_body),m10) = parsed
+        return Module("name", ModuleInterface(interface_names), module_body)
+
+    return keyword("module") + id + \
+        keyword("interface") + keyword("[") + Lazy(moduleInterfaceP) + keyword("]") + \
+            keyword("body") + keyword("[") + Lazy(moduleBodyP) + keyword("]") ^ process
+
+def moduleInterfaceP():
+    return Rep(id) 
+
+
+def moduleBodyP():
+    def process(parsed):
+        debug("process moduleBodyP")
+        defns = parsed
+        return ModuleBody(defns)
+    
+    return Rep(defnP()) ^ process
+
+
+def defnP():
+    def process(parsed):
+        ((name,m2),exp) = parsed 
+        return Defn(name, exp)
+    return id + keyword("=") + Lazy(exprP) ^ process
+
+def programP():
+    def process(parsed):
+        debug("process programP")
+        (modules, body) = parsed
+        return Program(modules, body)
+        
+    return  Rep(moduleP()) + Lazy(exprP) ^ process
+
+# evaluator 
+class AbsEnv: 
+    def apply(self, name):
+        raise Exception("not implented")
+
+class EmptyEnv(AbsEnv):
+    def apply(self, name):
+        raise Exception("not found: {}".format(name))
+
+class ExtendEnv(AbsEnv):
+    def __init__(self, name, value, old_env: AbsEnv):
+        self.name = name 
+        self.value = value 
+        self.old_env = old_env 
+
+    def apply(self, name):
+        if self.name == name:
+            return self.value 
+        else:
+            return self.old_env.apply(name)
+
+class ExpValue:
+    def __str__(self):
+        raise Exception("not implemented") 
+
+class IntValue(ExpValue):
+    def __init__(self, value):
+        self.value = value 
+
+    def __str__(self):
+        return str(self.value)
+
+class BoolValue(ExpValue):
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return str(self.value)
+    
+    
+def value_of(expr: AbsExp, env: AbsEnv) -> ExpValue:
+    if isinstance(expr, ConstExp):
+        return IntValue(expr.num)
+    elif isinstance(expr, VarExp):
+        return env.apply(expr.name)
+    elif isinstance(expr, ZeroExp):
+        num_val = value_of(expr.exp1, env)
+        if isinstance(num_val, IntValue) and num_val.value == 0:
+            return BoolValue(True)
+        if isinstance(num_val, IntValue) and num_val.value != 0:
+            return BoolValue(False)
+        else:
+            raise Exception("ZeroExp not expected")
+    elif isinstance(expr, LetExp):
+        bind_val = value_of(expr.bind_exp, env)
+        return value_of(expr.body, ExtendEnv(expr.bound_var, bind_val, env))
+    elif isinstance(expr, IfExp):
+        pred_val = value_of(expr.pred, env)
+        if not isinstance(pred_val, BoolValue):
+            raise Exception("pred_val must be BoolValue")
+        if pred_val.value:
+            return value_of(expr.true_body, env)
+        else:
+            return value_of(expr.false_body, env)
+    else:
+        raise Exception("not expected")
+
+
+# some test
 def test():
-    tokens = let_lex("let a = if 1 then 2 else 3 in let b = 3 in zero?(1)")
+    # tokens = let_lex("let a = if 1 then 2 else 3 in let b = 3 in zero?(1)")
     # tokens = let_lex("zero?(1)")
     # tokens = let_lex("if a then b else c")
+    tokens = let_lex('''
+                     module m1
+                     interface [a b c]
+                     body []
+                     module m2
+                     interface [x y z]
+                     body []
+                     1
+                     ''')
+    # tokens = let_lex('''
+    #                 1
+    #                 ''')
+    # tokens = let_lex("""
+    #                  in in in 1
+    #                  """)
+    print(tokens)         
     ast = let_parse(tokens)
     print(dumpAst(ast))
     # print(ast)
 
+def test_value_of():
+    # tokens = let_lex("let a = let a = 8 in a in a")
+    # tokens = let_lex("zero?(1)")
+    tokens = let_lex("if zero?(1) then 2 else 3")
+    ast = let_parse(tokens)
+    print(dumpAst(ast))
+    print("value_of: ")
+    print(value_of(ast, EmptyEnv()))
+    
 if __name__ == "__main__":
     test()
+    # test_value_of()
