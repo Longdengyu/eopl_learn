@@ -755,10 +755,19 @@ def test_case1():
                 b
             ]
             body [
-                a = 0
+                a = 1
                 b = zero?(a)
             ]
-        from m1 take b
+        module m2 
+            interface [
+                a
+                b
+            ]
+            body [
+                a = 1
+                b = if zero?(100) then from m1 take a else from m1 take b
+            ]
+        from m2 take b
     """
     
     tokens = let_lex(program)
