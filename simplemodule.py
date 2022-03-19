@@ -582,10 +582,22 @@ def value_of(expr: AbsExp, env: AbsEnv) -> ExpValue:
         
         return value_of(expr.body, current_env)
     elif isinstance(expr, Module):
-        # TODO:remove the stub code
+        defn_table = {}
+        current_env = env 
+        for defn in expr.body.defns:
+            (name, defn_body) = defn.name, defn.exp
+            defn_val = value_of(defn_body, current_env)
+            defn_table[name] = defn_val
+            current_env = ExtendEnv(name, defn_val, current_env)
+        
         exports = {}
-        exports["a"] = IntValue(1)
+        for export_name in expr.interface.names:
+            if export_name not in defn_table:
+                raise Exception("export name {} not defined".format(export_name))
+            else:
+                exports[export_name] = defn_table[export_name]
         return ModuleValue(expr.name, exports)
+            
     elif isinstance(expr, FromExp):
         m_v = env.apply(expr.m_name)
         return m_v.apply(expr.m_var)
@@ -739,12 +751,14 @@ def test_case1():
     program = """
         module m1
             interface [
-                a
+                a 
+                b
             ]
             body [
-                a = 1
+                a = 0
+                b = zero?(a)
             ]
-        from m1 take a
+        from m1 take b
     """
     
     tokens = let_lex(program)
