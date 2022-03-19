@@ -1,4 +1,4 @@
-
+# TODO: rewrite the evaluator with visitor pattern
 # lexer lib
 # ref: https://www.jayconrod.com/posts/37/a-simple-interpreter-from-scratch-in-python--part-1-
 
@@ -257,12 +257,7 @@ class AbsExp:pass
 class VarExp(AbsExp):
     def __init__(self, name):
         self.name = name 
-        
-    # def __str__(self):
-    #     return """
-    # VarExp: {}
-    # """.format(self.name)
-    
+
 class LetExp(AbsExp):
     def __init__(self, bound_var, bind_exp: AbsExp, body: AbsExp):
         self.bound_var = bound_var 
@@ -470,8 +465,8 @@ def fromP():
 def moduleP():
     def process(parsed):
         debug("process moduleP")
-        (((((((((m1,m2),m3),m4),interface_names),m6),m7),m8),module_body),m10) = parsed
-        return Module("name", ModuleInterface(interface_names), module_body)
+        (((((((((m1,module_name),m3),m4),interface_names),m6),m7),m8),module_body),m10) = parsed
+        return Module(module_name, ModuleInterface(interface_names), module_body)
 
     return keyword("module") + id + \
         keyword("interface") + keyword("[") + Lazy(moduleInterfaceP) + keyword("]") + \
@@ -542,8 +537,19 @@ class BoolValue(ExpValue):
 
     def __str__(self):
         return str(self.value)
+
+
+class ModuleValue(ExpValue):
+    def __init__(self, name, exports):
+        self.name = name
+        self.exports = exports 
     
-    
+    def apply(self, name):
+        if not name in self.exports:
+            raise Exception("not found in Module")
+        return self.exports[name]
+
+
 def value_of(expr: AbsExp, env: AbsEnv) -> ExpValue:
     if isinstance(expr, ConstExp):
         return IntValue(expr.num)
@@ -568,9 +574,108 @@ def value_of(expr: AbsExp, env: AbsEnv) -> ExpValue:
             return value_of(expr.true_body, env)
         else:
             return value_of(expr.false_body, env)
+    elif isinstance(expr, Program):
+        current_env = env
+        for m_exp in expr.modules:
+            m_v = value_of(m_exp, current_env)
+            current_env = ExtendEnv(m_v.name, m_v, current_env)
+        
+        return value_of(expr.body, current_env)
+    elif isinstance(expr, Module):
+        # TODO:remove the stub code
+        exports = {}
+        exports["a"] = IntValue(1)
+        return ModuleValue(expr.name, exports)
+    elif isinstance(expr, FromExp):
+        m_v = env.apply(expr.m_name)
+        return m_v.apply(expr.m_var)
     else:
         raise Exception("not expected")
 
+    """
+    value_of
+        program
+        module
+        body
+        from
+    
+    define the value representation of a module
+    
+    name: module_value
+    usage:
+        from m take n
+        1: lookup module value from env 
+        2: lookup value from m
+            -> apply m_v name
+            
+    describe the behavior of let* pattern
+    module body:
+        0: init_env
+        a = 1  env1
+        b = a + 1 env2 (a)
+        c = a + b env3(b a)
+    
+    module defins:
+        0: init_env
+        m1 = xxx env1(init_env)
+        m2 = xxx env2(m1, env1)
+    
+    TODO:
+    | collect the usages
+        | apply m var -> exprval
+        | apply: ModuleValue -> String -> ExpValue
+        
+    | collect the function
+        apply of ModuleValue
+        
+    | define the module value representation
+        class ModuleValue
+            def __init__(self, ...)
+                lookup_table # the keys is interface names
+            def apply(self, name):
+                xxx
+
+    | list the function signature
+        ModuleVale
+            __init__(self, dict)
+            apply(self, name)
+        
+    | make some stub function
+        | lookup of module
+        | lookup in module
+        
+    | write the small test case for every aspect of the evaluation
+        | case1: value_of(from m1 take name)
+            | false case
+                module_value1
+            | trueth case
+                module_value2
+        | case2: value_of(module_defn)
+            | case 1: empty module 
+                module m1 interface [] body []
+            | case 2: none empty module 
+                module m1 interface [a] body [a = 1]
+            | case 3: none empty module
+                module m1 interface [a b] body [a = 1 b = a c = a + b]
+            | case 4: many module
+                case41:
+                    module m1 
+                    interface [a]
+                    body [a = 1]
+                    
+                    module m2
+                    interface [b]
+                    body [b = a]
+                case41:
+                    module m1
+                        interface [a]
+                        body [a = 1]
+                    module m2
+                        interface [a]
+                        body [a = zero?(from m1 take a)]
+        
+    | check it
+    """
 
 # some test
 def test():
@@ -622,7 +727,33 @@ def test_value_of():
     print(dumpAst(ast))
     print("value_of: ")
     print(value_of(ast, EmptyEnv()))
+
+def test_case1():
+    """
+            | case1: value_of(from m1 take name)
+            | false case
+                module_value1
+            | trueth case
+                module_value2
+    """
+    program = """
+        module m1
+            interface [
+                a
+            ]
+            body [
+                a = 1
+            ]
+        from m1 take a
+    """
     
+    tokens = let_lex(program)
+    ast = let_parse(tokens)
+    print(dumpAst(ast))
+    print("value_of: ")
+    print(value_of(ast, EmptyEnv()))
+
 if __name__ == "__main__":
-    test()
+    # test()
+    test_case1()
     # test_value_of()
