@@ -1,2 +1,2 @@
 all:
-  ghci
+	ghc main.hs
