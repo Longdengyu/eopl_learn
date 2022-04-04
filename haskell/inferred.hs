@@ -477,14 +477,13 @@ typeOf expr tEnv subst = case expr of
         Answer (randType, subst2) <- typeOf rand tEnv subst1
         subst3 <- unifier ratorType (ProcType randType resultType) subst2 expr
         return $ Answer (resultType, subst3)
-
-    -- LetRec pResultOpType pName bVar bVarOpType pBodyExpr letRecBodyExpr -> do 
-    --     let pResultType = opTypeToType pResultOpType
-    --     let bVarType = opTypeToType bVarOpType
-    --     let tEnvForLetRecBody = ExtendTEnv pName (ProcType bVarType pResultType) tEnv
-    --     Answer (pBodyType, subst) <- typeOf pBodyExpr (ExtendTEnv bVar bVarType tEnvForLetRecBody) subst 
-    --     let subst = unifier pBodyType pResultType subst pBodyExpr
-    --     typeOf letRecBodyExpr tEnvForLetRecBody subst
+    LetRec pResultOpType pName bVar bVarOpType pBodyExpr letRecBodyExpr -> do 
+        pResultType <- opTypeToType pResultOpType
+        bVarType <- opTypeToType bVarOpType
+        let tEnvForLetRecBody = ExtendTEnv pName (ProcType bVarType pResultType) tEnv
+        Answer (pBodyType, subst1) <- typeOf pBodyExpr (ExtendTEnv bVar bVarType tEnvForLetRecBody) subst 
+        subst2 <- unifier pBodyType pResultType subst1 pBodyExpr
+        typeOf letRecBodyExpr tEnvForLetRecBody subst2
 
 
 -- test 
@@ -514,7 +513,7 @@ testTypeOf s = do
 
 test = do 
     -- testInterp "let a = newref (123) in begin setref (a 999); setref (a 100); deref (a) end"
-    -- testTypeOf "letrec int double (x : int) = if zero?(x) then 0 else -((double -(x,1)), -2) in (double 2)"
+    testTypeOf "letrec int double (x : int) = if zero?(x) then 0 else -((double -(x,1)), -2) in (double 2)"
     -- parse parseType "test" "( int -> (int -> bool))"
     -- testInterp "zero?(zero?(1))"
     -- testParse "proc (x:?) x"
@@ -523,6 +522,7 @@ test = do
     -- testTypeOf "-(1, zero?(1))"
     -- testTypeOf "let f = 1 in f"
     -- testTypeOf "proc (x:int) x"
+    -- testTypeOf "letrec int f(n:int) = n in (f 1)"
 
 -- [DONE] TODO: using optional type annatation 
 -- TODO: doing unification 
