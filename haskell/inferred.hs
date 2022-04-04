@@ -195,8 +195,10 @@ data Env
 
 type Store = [Value]
 type InterpM = StateT Store (ExceptT String Identity)
+type TypeCheckerM = StateT Int (ExceptT String Identity)
 
 runInterp m = (runIdentity . runExceptT . runStateT m) []
+runTypeChecker m = (runIdentity . runExceptT . runStateT m) 0
 
 mylookup :: Id -> Env -> InterpM Value 
 mylookup _ EmptyEnv = throwError "mylookup failed" 
@@ -337,7 +339,7 @@ data TEnv
     | ExtendTEnv Id Type TEnv 
     deriving Show 
 
-tmylookup :: Id -> TEnv -> InterpM Type
+tmylookup :: Id -> TEnv -> TypeCheckerM Type
 tmylookup _ EmptyTEnv = throwError "mylookup in tenv failed"
 tmylookup var (ExtendTEnv name value oldTenv) = 
     if var == name 
@@ -375,13 +377,15 @@ extendSubst subst (VarType sn) ty = do
 extendSubst _ _ _ = error "extendSubst second argument must be VarType"
 
 applySubstToType :: Type -> Subst -> Type 
-applySubstToType IntType _ = IntType
-applySubstToType BoolType _ = BoolType 
-applySubstToType (ProcType argType resultType) subst = ProcType (applySubstToType argType subst)
-                                                                (applySubstToType resultType subst)
-applySubstToType (VarType sn) subst = case (lookup sn subst) of 
-    Just ty -> ty
-    Nothing -> error "applySubstToType: lookup failed"
+applySubstToType ty subst = case ty of 
+    IntType -> IntType
+    BoolType -> BoolType
+    ProcType argType resultType -> ProcType (applySubstToType argType subst)
+                                            (applySubstToType resultType subst)
+    VarType sn -> case lookup sn subst of 
+        Just ty -> ty
+        Nothing -> error "applySubstToType: lookup failed"
+
 
 noOccurrence :: Type -> Type -> Bool 
 noOccurrence (VarType sn) ty = case ty of 
@@ -395,17 +399,17 @@ noOccurrence _ _ = error "the firest argument must be varType"
 
 unifier :: Type -> Type -> Subst -> Expr -> Subst
 unifier ty1 ty2 subst expr = do 
-    let ty1 = applySubstToType ty1 subst
-    let ty2 = applySubstToType ty2 subst
-    case (ty1, ty2) of 
-        (ty1, ty2) | ty1 == ty2 -> subst
-        (VarType sn, ty2) -> do 
-            if noOccurrence ty1 ty2 
-                then extendSubst subst ty1 ty2 
+    let ty1_ = applySubstToType ty1 subst
+    let ty2_ = applySubstToType ty2 subst
+    case (ty1_, ty2_) of 
+        (ty1_, ty2_) | ty1_ == ty2_ -> subst
+        (VarType sn, ty2_) -> do 
+            if noOccurrence ty1_ ty2_ 
+                then extendSubst subst ty1_ ty2_ 
                 else error "no-occurrence-violation"
-        (ty1, VarType sn) -> do 
-            if noOccurrence ty2 ty1 
-                then extendSubst subst ty2 ty1 
+        (ty1_, VarType sn) -> do 
+            if noOccurrence ty2_ ty1_ 
+                then extendSubst subst ty2_ ty1_ 
                 else error "no-occurrence-violation"
         ((ProcType argType1 resultType1), (ProcType argType2 resultType2)) -> do 
             let subst = unifier argType1 argType2 subst expr
@@ -413,6 +417,67 @@ unifier ty1 ty2 subst expr = do
             subst
         otherwise -> error "unification-failure"
 
+
+
+freshTVarType :: TypeCheckerM Type
+freshTVarType = do 
+    num <- get 
+    put (num + 1)
+    return (VarType num)
+
+opTypeToType :: OpType -> TypeCheckerM Type
+opTypeToType NoType = freshTVarType
+opTypeToType (AType ty) = return ty 
+
+newtype Answer = Answer { unAnswer ::(Type, Subst)} deriving Show 
+
+
+
+typeOf :: Expr -> TEnv -> Subst -> TypeCheckerM Answer
+typeOf expr tEnv subst = case expr of 
+    Const _ -> return (Answer (IntType, subst)) 
+    Zero expr1 -> do 
+        Answer (ty1, subst1) <- typeOf expr1 tEnv subst
+        let subst2 = unifier ty1 IntType subst1 (Zero expr1)
+        return $ Answer (BoolType, subst2)     
+    Diff expr1 expr2 -> do 
+        Answer (ty1, subst1) <- typeOf expr1 tEnv subst
+        let subst1_ = unifier ty1 IntType subst1 expr1
+        Answer (ty2, subst2) <- typeOf expr2 tEnv subst1_
+        let subst2_ = unifier ty2 IntType subst2 expr2 
+        return $ Answer (IntType, subst2_)   
+    If expr1 expr2 expr3 -> do 
+        Answer (ty1, subst1) <- typeOf expr1 tEnv subst
+        let subst2 = unifier ty1 BoolType subst1 expr1 
+        Answer (ty2, subst3) <- typeOf expr2 tEnv subst2
+        Answer (ty3, subst4) <- typeOf expr3 tEnv subst3
+        let subst5 = unifier ty2 ty3 subst4 (If expr1 expr2 expr3)
+        return $ Answer (ty2, subst5)
+    Var name -> do 
+        ty <- tmylookup name tEnv
+        return $ Answer (ty, subst) 
+    Let var bindExpr bodyExpr -> do 
+        Answer (tyBind, subst1) <- typeOf bindExpr tEnv subst 
+        typeOf bodyExpr (ExtendTEnv var tyBind tEnv) subst1
+    Proc arg opType bodyExpr -> do 
+        argType <- opTypeToType opType  
+        Answer (bodyType, subst1) <- typeOf bodyExpr (ExtendTEnv arg argType tEnv) subst 
+        return $ Answer ((ProcType argType bodyType), subst1)
+    Call rator rand -> do 
+        resultType <- freshTVarType
+        Answer (ratorType, subst1) <- typeOf rator tEnv subst
+        Answer (randType, subst2) <- typeOf rand tEnv subst1
+        let subst3 = unifier ratorType (ProcType randType resultType) subst2 expr
+        return $ Answer (resultType, subst3)
+        -- where freshTVarType = VarType 1 --TODO: fix this
+
+    -- LetRec pResultOpType pName bVar bVarOpType pBodyExpr letRecBodyExpr -> do 
+    --     let pResultType = opTypeToType pResultOpType
+    --     let bVarType = opTypeToType bVarOpType
+    --     let tEnvForLetRecBody = ExtendTEnv pName (ProcType bVarType pResultType) tEnv
+    --     Answer (pBodyType, subst) <- typeOf pBodyExpr (ExtendTEnv bVar bVarType tEnvForLetRecBody) subst 
+    --     let subst = unifier pBodyType pResultType subst pBodyExpr
+    --     typeOf letRecBodyExpr tEnvForLetRecBody subst
 
 
 -- test 
@@ -429,13 +494,26 @@ testInterp s = do
 testParse s = do 
     parse parseExpr "test" s 
 
+
+testTypeOf s = do 
+    case (parse parseExpr "testTypeOf" s) of 
+        Right expr ->  do 
+            putStr $ show $ runTypeChecker (typeOf expr EmptyTEnv [])
+            putStr "\n"
+        Left err -> do 
+            putStr $ show err
+            putStr "\n"
+
+
 test = do 
     -- testInterp "let a = newref (123) in begin setref (a 999); setref (a 100); deref (a) end"
     -- testTypeOf "letrec int double (x : int) = if zero?(x) then 0 else -((double -(x,1)), -2) in (double 2)"
     -- parse parseType "test" "( int -> (int -> bool))"
     -- testInterp "zero?(zero?(1))"
-    testParse "proc (x:?) x"
- 
+    -- testParse "proc (x:?) x"
+    -- testTypeOf "1"
+    testTypeOf "let f = proc (x:int) x in (f 1)"
+    -- testTypeOf "proc (x:int) x"
 
 -- [DONE] TODO: using optional type annatation 
 -- TODO: doing unification 
