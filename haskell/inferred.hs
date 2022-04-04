@@ -7,7 +7,9 @@ import Control.Monad (guard)
 import Control.Monad.Trans.Maybe 
 import Control.Monad.Trans.State 
 import Control.Monad.Trans.Except  
+import qualified Control.Monad.Trans.Writer as W 
 import Control.Monad.Except  
+-- import Control.Monad.Writer
 
 
 -- AST 
@@ -195,10 +197,11 @@ data Env
 
 type Store = [Value]
 type InterpM = StateT Store (ExceptT String Identity)
-type TypeCheckerM = StateT Int (ExceptT String Identity)
+-- type TypeCheckerM = StateT Int (ExceptT String Identity)
+type TypeCheckerM = StateT Int (ExceptT String (W.WriterT String Identity))
 
 runInterp m = (runIdentity . runExceptT . runStateT m) []
-runTypeChecker m = (runIdentity . runExceptT . runStateT m) 0
+runTypeChecker m = (runIdentity . W.runWriterT . runExceptT . runStateT m) 0
 
 mylookup :: Id -> Env -> InterpM Value 
 mylookup _ EmptyEnv = throwError "mylookup failed" 
@@ -376,15 +379,22 @@ extendSubst subst (VarType sn) ty = do
     (sn, ty):subst2
 extendSubst _ _ _ = error "extendSubst second argument must be VarType"
 
-applySubstToType :: Type -> Subst -> Type 
+
+tell :: String -> TypeCheckerM ()  
+tell = (lift . lift . W.tell)
+
+applySubstToType :: Type -> Subst -> TypeCheckerM Type 
 applySubstToType ty subst = case ty of 
-    IntType -> IntType
-    BoolType -> BoolType
-    ProcType argType resultType -> ProcType (applySubstToType argType subst)
-                                            (applySubstToType resultType subst)
-    VarType sn -> case lookup sn subst of 
-        Just ty -> ty
-        Nothing -> error "applySubstToType: lookup failed"
+    IntType -> return IntType
+    BoolType -> return BoolType
+    ProcType argType resultType -> do 
+        argType_ <- applySubstToType argType subst
+        resultType_ <- applySubstToType resultType subst
+        return $ ProcType argType_ resultType_
+    VarType sn -> do 
+        case lookup sn subst of 
+            Just lookupResult -> return lookupResult
+            Nothing -> return ty
 
 
 noOccurrence :: Type -> Type -> Bool 
@@ -397,25 +407,25 @@ noOccurrence (VarType sn) ty = case ty of
     (VarType sn2) -> not (sn == sn2)
 noOccurrence _ _ = error "the firest argument must be varType"
 
-unifier :: Type -> Type -> Subst -> Expr -> Subst
+unifier :: Type -> Type -> Subst -> Expr -> TypeCheckerM Subst
 unifier ty1 ty2 subst expr = do 
-    let ty1_ = applySubstToType ty1 subst
-    let ty2_ = applySubstToType ty2 subst
+    ty1_ <- applySubstToType ty1 subst
+    ty2_ <- applySubstToType ty2 subst
     case (ty1_, ty2_) of 
-        (ty1_, ty2_) | ty1_ == ty2_ -> subst
+        (ty1_, ty2_) | ty1_ == ty2_ -> return subst
         (VarType sn, ty2_) -> do 
             if noOccurrence ty1_ ty2_ 
-                then extendSubst subst ty1_ ty2_ 
-                else error "no-occurrence-violation"
+                then return $ extendSubst subst ty1_ ty2_ 
+                else throwError "no-occurrence-violation"
         (ty1_, VarType sn) -> do 
             if noOccurrence ty2_ ty1_ 
-                then extendSubst subst ty2_ ty1_ 
-                else error "no-occurrence-violation"
+                then return $ extendSubst subst ty2_ ty1_ 
+                else throwError "no-occurrence-violation"
         ((ProcType argType1 resultType1), (ProcType argType2 resultType2)) -> do 
-            let subst = unifier argType1 argType2 subst expr
-            let subst = unifier resultType1 resultType2 subst expr 
-            subst
-        otherwise -> error "unification-failure"
+            subst1 <- unifier argType1 argType2 subst expr
+            subst2 <- unifier resultType1 resultType2 subst1 expr 
+            return subst2
+        otherwise -> throwError "unification-failure"
 
 
 
@@ -431,45 +441,42 @@ opTypeToType (AType ty) = return ty
 
 newtype Answer = Answer { unAnswer ::(Type, Subst)} deriving Show 
 
-
-
 typeOf :: Expr -> TEnv -> Subst -> TypeCheckerM Answer
 typeOf expr tEnv subst = case expr of 
     Const _ -> return (Answer (IntType, subst)) 
     Zero expr1 -> do 
         Answer (ty1, subst1) <- typeOf expr1 tEnv subst
-        let subst2 = unifier ty1 IntType subst1 (Zero expr1)
+        subst2 <- unifier ty1 IntType subst1 (Zero expr1)
         return $ Answer (BoolType, subst2)     
     Diff expr1 expr2 -> do 
         Answer (ty1, subst1) <- typeOf expr1 tEnv subst
-        let subst1_ = unifier ty1 IntType subst1 expr1
+        subst1_ <- unifier ty1 IntType subst1 expr1
         Answer (ty2, subst2) <- typeOf expr2 tEnv subst1_
-        let subst2_ = unifier ty2 IntType subst2 expr2 
+        subst2_ <- unifier ty2 IntType subst2 expr2 
         return $ Answer (IntType, subst2_)   
     If expr1 expr2 expr3 -> do 
         Answer (ty1, subst1) <- typeOf expr1 tEnv subst
-        let subst2 = unifier ty1 BoolType subst1 expr1 
+        subst2 <- unifier ty1 BoolType subst1 expr1 
         Answer (ty2, subst3) <- typeOf expr2 tEnv subst2
         Answer (ty3, subst4) <- typeOf expr3 tEnv subst3
-        let subst5 = unifier ty2 ty3 subst4 (If expr1 expr2 expr3)
+        subst5 <- unifier ty2 ty3 subst4 (If expr1 expr2 expr3)
         return $ Answer (ty2, subst5)
     Var name -> do 
         ty <- tmylookup name tEnv
         return $ Answer (ty, subst) 
     Let var bindExpr bodyExpr -> do 
-        Answer (tyBind, subst1) <- typeOf bindExpr tEnv subst 
+        Answer (tyBind, subst1) <- typeOf bindExpr tEnv subst
         typeOf bodyExpr (ExtendTEnv var tyBind tEnv) subst1
     Proc arg opType bodyExpr -> do 
         argType <- opTypeToType opType  
         Answer (bodyType, subst1) <- typeOf bodyExpr (ExtendTEnv arg argType tEnv) subst 
         return $ Answer ((ProcType argType bodyType), subst1)
-    Call rator rand -> do 
+    Call rator rand -> do
         resultType <- freshTVarType
         Answer (ratorType, subst1) <- typeOf rator tEnv subst
         Answer (randType, subst2) <- typeOf rand tEnv subst1
-        let subst3 = unifier ratorType (ProcType randType resultType) subst2 expr
+        subst3 <- unifier ratorType (ProcType randType resultType) subst2 expr
         return $ Answer (resultType, subst3)
-        -- where freshTVarType = VarType 1 --TODO: fix this
 
     -- LetRec pResultOpType pName bVar bVarOpType pBodyExpr letRecBodyExpr -> do 
     --     let pResultType = opTypeToType pResultOpType
@@ -498,7 +505,7 @@ testParse s = do
 testTypeOf s = do 
     case (parse parseExpr "testTypeOf" s) of 
         Right expr ->  do 
-            putStr $ show $ runTypeChecker (typeOf expr EmptyTEnv [])
+            putStr $ show $ runTypeChecker (typeOf expr EmptyTEnv emptySubst)
             putStr "\n"
         Left err -> do 
             putStr $ show err
@@ -512,9 +519,16 @@ test = do
     -- testInterp "zero?(zero?(1))"
     -- testParse "proc (x:?) x"
     -- testTypeOf "1"
-    testTypeOf "let f = proc (x:int) x in (f 1)"
+    -- testTypeOf "let f = proc (x:?) x in (f zero?(1))"
+    -- testTypeOf "-(1, zero?(1))"
+    -- testTypeOf "let f = 1 in f"
     -- testTypeOf "proc (x:int) x"
 
 -- [DONE] TODO: using optional type annatation 
 -- TODO: doing unification 
 -- TODO: EOPL page 288:Finding the Type of an Expression
+-- LEARNED: the typeOf Call seems not right, but actually it's right, you should think carefully
+-- LEARNED: apart from the unification algorithm, the typeOf Call is very nice
+-- TODO: Add typeOf for LetRec expression
+-- TODO: change the order of writer monad so that when throwError I can also see the log
+
