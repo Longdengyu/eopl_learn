@@ -580,7 +580,7 @@ valueOfModule (ModuleDefn mName expectedIFace (ModuleBody defns)) env = do
 
         declsToNames :: [Decl] -> [String] -> [String]
         declsToNames [] names = names 
-        declsToNames ((Decl name _):xs) names = name:names
+        declsToNames ((Decl name _):xs) names = name:(declsToNames xs names)
 
 valueOfDefns :: [Defn] -> Env -> InterpM Env 
 valueOfDefns [] env = return $ env 
@@ -630,6 +630,4 @@ testParseProgram s = do
 
 
 test = do 
-    testInterp "module m1 interface [a:int b:bool] body [a = 2 b = zero?(1)] module m2 interface [a:int b:bool] body [a = 3 b = zero?(1)] from m2 take a"
-
-
+    testInterp "module m1 interface [a:int b:bool] body [a = 111 b = zero?(0)] module m2 interface [a:int b:bool] body [a = from m1 take b b = zero?(1)] from m2 take a"
