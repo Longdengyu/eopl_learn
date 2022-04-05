@@ -196,6 +196,7 @@ data Value
     | ProcValue Procedure 
     | RefValue Int 
     | UnitValue 
+    | MValue ModuleValue -- TODO: the value is expvalue modulevalue sit here is not appropriate 
     deriving Show 
 
 data Env 
@@ -205,11 +206,14 @@ data Env
     deriving Show 
 
 type Store = [Value]
-type InterpM = StateT Store (ExceptT String Identity)
+-- type InterpM = StateT Store (ExceptT String Identity)
+type InterpM = StateT Store (ExceptT String (W.WriterT String Identity))
+
 -- type TypeCheckerM = StateT Int (ExceptT String Identity)
 type TypeCheckerM = StateT Int (ExceptT String (W.WriterT String Identity))
 
-runInterp m = (runIdentity . runExceptT . runStateT m) []
+runInterp m = (runIdentity . W.runWriterT . runExceptT . runStateT m) []
+-- runInterp m = (runIdentity . runExceptT . runStateT m) []
 runTypeChecker m = (runIdentity . W.runWriterT . runExceptT . runStateT m) 0
 
 mylookup :: Id -> Env -> InterpM Value 
@@ -224,75 +228,77 @@ mylookup var (ExtendEnvRec pName bVar pBody oldEnv) = do
         else mylookup var oldEnv 
 
 valueOf :: Expr -> Env -> InterpM Value 
-valueOf (Const n) _ = return (NumValue n)
-valueOf (Var name) env = mylookup name env
-valueOf (Zero expr1) env = do 
-    value <- valueOf expr1 env 
-    case value of 
-        NumValue n -> return (BoolValue (n == 0))
-        _ -> throwError "Zero not num"
+valueOf expr env = case expr of 
+    Const n -> return (NumValue n)
+    Var name -> mylookup name env
+    Zero expr1 -> do 
+        value <- valueOf expr1 env 
+        case value of 
+            NumValue n -> return (BoolValue (n == 0))
+            _ -> throwError "Zero not num"
+    Let var bindExpr bodyExpr -> do 
+        bindValue <- valueOf bindExpr env 
+        valueOf bodyExpr (ExtendEnv var bindValue env)
+    If expr1 expr2 expr3 -> do 
+        v1 <- valueOf expr1 env 
+        case v1 of 
+            BoolValue b -> do 
+                if b 
+                    then valueOf expr2 env 
+                    else valueOf expr3 env 
+            _ -> throwError "If pred is not Bool Value"
+    Diff expr1 expr2 -> do 
+        v1 <- valueOf expr1 env 
+        v2 <- valueOf expr2 env 
+        case (v1, v2) of 
+            (NumValue num1, NumValue num2) -> return (NumValue (num1 - num2))
+            _ -> throwError "Diff not Number"
+    Proc var ty body -> return $ ProcValue (Procedure var body env)
+    Call rator rand -> do 
+        procValue <- valueOf rator env 
+        bindValue <- valueOf rand env 
+        case procValue of 
+            ProcValue (Procedure bindVar body pEnv) -> valueOf body (ExtendEnv bindVar bindValue pEnv)
+            _ -> throwError "Call rator not procedure"
 
-valueOf (Let var bindExpr bodyExpr) env = do 
-    bindValue <- valueOf bindExpr env 
-    valueOf bodyExpr (ExtendEnv var bindValue env)
-valueOf (If expr1 expr2 expr3) env = do 
-    v1 <- valueOf expr1 env 
-    case v1 of 
-        BoolValue b -> do 
-            if b 
-                then valueOf expr2 env 
-                else valueOf expr3 env 
-        _ -> throwError "If pred is not Bool Value"
-
-valueOf (Diff expr1 expr2) env = do 
-    v1 <- valueOf expr1 env 
-    v2 <- valueOf expr2 env 
-    case (v1, v2) of 
-        (NumValue num1, NumValue num2) -> return (NumValue (num1 - num2))
-        _ -> throwError "Diff not Number"
-valueOf (Proc var ty body) env = return (ProcValue (Procedure var body env))
-valueOf (Call rator rand) env = do 
-    procValue <- valueOf rator env 
-    bindValue <- valueOf rand env 
-    case procValue of 
-        ProcValue (Procedure bindVar body pEnv) -> valueOf body (ExtendEnv bindVar bindValue pEnv)
-        _ -> throwError "Call rator not procedure"
-
-valueOf (LetRec resultType pName bVar bVarType pBody letrecBody) env = valueOf letrecBody  (ExtendEnvRec pName bVar pBody env)
-valueOf (Begin exprs) env = case exprs of 
-    x:[] -> valueOf x env
-    x:xs -> do 
-        valueOf x env 
-        valueOf (Begin xs) env 
-valueOf (NewRef expr1) env = do 
-    value <- valueOf expr1 env 
-    store <- get 
-    let nextRef = length store 
-    put (store ++ [value])
-    return (RefValue nextRef)
-valueOf (DeRef expr1) env = do 
-    v1 <- valueOf expr1 env 
-    case v1 of 
-        RefValue index -> do 
-            store <- get 
-            return (store !! index)
-        _ -> throwError "Deref not RefValue"
-valueOf (SetRef expr1 expr2) env = do 
-    v1 <- valueOf expr1 env 
-    case v1 of 
-        RefValue index -> do 
-            value <- valueOf expr2 env 
-            store <- get 
-            put (replaceNth index value store)
-            return UnitValue
-            where 
-                replaceNth :: Int -> a -> [a] -> [a]
-                replaceNth _ _ [] = []
-                replaceNth n newVal (x:xs)
-                    | n == 0 = newVal:xs
-                    | otherwise = x:replaceNth (n-1) newVal xs
-        _ -> throwError "SetRef: not RefValue"
-
+    LetRec resultType pName bVar bVarType pBody letrecBody -> valueOf letrecBody  (ExtendEnvRec pName bVar pBody env)
+    Begin exprs -> case exprs of 
+        x:[] -> valueOf x env
+        x:xs -> do 
+            valueOf x env 
+            valueOf (Begin xs) env 
+    NewRef expr1 -> do 
+        value <- valueOf expr1 env 
+        store <- get 
+        let nextRef = length store 
+        put (store ++ [value])
+        return (RefValue nextRef)
+    DeRef expr1 -> do 
+        v1 <- valueOf expr1 env 
+        case v1 of 
+            RefValue index -> do 
+                store <- get 
+                return (store !! index)
+            _ -> throwError "Deref not RefValue"
+    SetRef expr1 expr2 -> do 
+        v1 <- valueOf expr1 env 
+        case v1 of 
+            RefValue index -> do 
+                value <- valueOf expr2 env 
+                store <- get 
+                put (replaceNth index value store)
+                return UnitValue
+                where 
+                    replaceNth :: Int -> a -> [a] -> [a]
+                    replaceNth _ _ [] = []
+                    replaceNth n newVal (x:xs)
+                        | n == 0 = newVal:xs
+                        | otherwise = x:replaceNth (n-1) newVal xs
+            _ -> throwError "SetRef: not RefValue"
+    QualifiedVar mName varName -> do 
+        value <- mylookup mName env
+        case value of 
+            MValue mValue -> applyModule mValue varName
 -- type 
 data Type
     = IntType
@@ -391,6 +397,9 @@ extendSubst _ _ _ = error "extendSubst second argument must be VarType"
 
 tell :: String -> TypeCheckerM ()  
 tell = (lift . lift . W.tell)
+
+mytell :: String -> InterpM ()  
+mytell = (lift . lift . W.tell)
 
 applySubstToType :: Type -> Subst -> TypeCheckerM Type 
 applySubstToType ty subst = case ty of 
@@ -549,18 +558,59 @@ parseProgram = do
     body <- parseExpr
     return $ Program mDefs body 
 
+data ModuleValue = ModuleValue Id [Id] Env deriving Show 
 
+
+applyModule :: ModuleValue -> Id -> InterpM Value 
+applyModule (ModuleValue _ exportNames env) name = do 
+    if elem name exportNames
+        then mylookup name env
+        else throwError "lookup failed in ModuleValue" 
+
+
+valueOfModule :: ModuleDefn -> Env -> InterpM Value 
+valueOfModule (ModuleDefn mName expectedIFace (ModuleBody defns)) env = do 
+    let decls = ifaceToDecls expectedIFace
+    let names = declsToNames decls []
+    mEnv <- valueOfDefns defns env
+    return $ MValue $ ModuleValue mName names mEnv
+    where 
+        ifaceToDecls :: Iface -> [Decl] 
+        ifaceToDecls (Iface decls) = decls 
+
+        declsToNames :: [Decl] -> [String] -> [String]
+        declsToNames [] names = names 
+        declsToNames ((Decl name _):xs) names = name:names
+
+valueOfDefns :: [Defn] -> Env -> InterpM Env 
+valueOfDefns [] env = return $ env 
+valueOfDefns ((Defn name bindExpr):xs) env = do 
+    value <- valueOf bindExpr env 
+    valueOfDefns xs (ExtendEnv name value env)
+
+-- let* sematics
+valueOfProgram :: Program -> InterpM Value
+valueOfProgram (Program mDefs body) = do
+    env <- valueOfModuleDefns mDefs EmptyEnv
+    -- mytell $ show env
+    valueOf body env 
+
+valueOfModuleDefns :: [ModuleDefn] -> Env -> InterpM Env 
+valueOfModuleDefns [] env = return $ env 
+valueOfModuleDefns (m@(ModuleDefn mName expectedIFace mBody):xs)  env = do 
+    mValue <- valueOfModule m env 
+    valueOfModuleDefns xs (ExtendEnv mName mValue env)
 
 -- test 
-
 testInterp s = do 
-    case (parse parseExpr "testInterp" s) of 
-        Right expr ->  do 
-            putStr $ show $ runInterp (valueOf expr EmptyEnv)
+    case parse parseProgram "test" s of 
+        Right prog@(Program mDefs body) ->  do 
+            putStr $ show $ runInterp (valueOfProgram prog)
             putStr "\n"
         Left err -> do 
             putStr $ show err
             putStr "\n"
+
 
 testParse s = do 
     parse parseExpr "test" s 
@@ -578,18 +628,8 @@ testTypeOf s = do
 testParseProgram s = do 
     parse parseProgram "test" s 
 
+
 test = do 
-    -- testInterp "let a = newref (123) in begin setref (a 999); setref (a 100); deref (a) end"
-    -- testTypeOf "letrec int double (x : int) = if zero?(x) then 0 else -((double -(x,1)), -2) in (double 2)"
-    -- parse parseType "test" "( int -> (int -> bool))"
-    -- testInterp "zero?(zero?(1))"
-    -- testParse "proc (x:?) x"
-    -- testTypeOf "1"
-    -- testTypeOf "let f = proc (x:?) x in (f zero?(1))"
-    -- testTypeOf "-(1, zero?(1))"
-    -- testTypeOf "let f = 1 in f"
-    -- testTypeOf "proc (x:int) x"
-    -- testTypeOf "letrec int f(n:int) = n in (f 1)"
-    testParseProgram "module m1 interface [a:int b:bool] body [a = 1 b = zero?(1)] a"
+    testInterp "module m1 interface [a:int b:bool] body [a = 2 b = zero?(1)] module m2 interface [a:int b:bool] body [a = 3 b = zero?(1)] from m2 take a"
 
 
