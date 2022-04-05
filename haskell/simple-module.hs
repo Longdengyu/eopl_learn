@@ -54,7 +54,7 @@ ident = do
     id <- thetoken ident_
     guard (not (elem id ["let", "in", "if", "then", "else", "proc", 
                         "zero", "letrec", "newref","deref", "setref", 
-                        "begin", "end", "from", "take", "module"] ))
+                        "begin", "end", "from", "take", "module", "interface", "body"] ))
     return id 
 
 positiveNum :: Parser Int 
