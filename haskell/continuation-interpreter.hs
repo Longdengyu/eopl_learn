@@ -269,21 +269,22 @@ valueOfK expr env cont = case expr of
         val <- mylookup name env
         applyCont cont val 
     Zero expr1 -> do 
-        let zeroCont = ZeroCont cont
         valueOfK expr1 env zeroCont
+        where zeroCont = ZeroCont cont
     Let var bindExpr bodyExpr -> do 
-        let letCont = LetCont var bodyExpr env cont
         valueOfK bindExpr env letCont
+        where 
+            letCont = LetCont var bodyExpr env cont
     If expr1 expr2 expr3 -> do
-        let ifCont = IfCont expr2 expr3 env cont 
         valueOfK expr1 env ifCont  
+        where 
+            ifCont = IfCont expr2 expr3 env cont 
     Diff expr1 expr2 -> do
         valueOfK expr1 env diff1Cont
         where 
             diff1Cont = Diff1Cont expr2 env cont 
     Proc var body -> do
-        let procValue = (ProcValue (Procedure var body env))
-        applyCont cont procValue
+        applyCont cont (ProcValue (Procedure var body env))
     Call rator rand -> do
         valueOfK rator env ratorCont
         where 
