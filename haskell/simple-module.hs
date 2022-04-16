@@ -305,6 +305,7 @@ data Type
     | BoolType 
     | ProcType Type Type 
     | VarType Int 
+    | ModuleType TEnv 
     deriving (Eq, Show) 
 
 data OpType
@@ -355,7 +356,8 @@ procTypeExpr = do
 data TEnv 
     = EmptyTEnv 
     | ExtendTEnv Id Type TEnv 
-    deriving Show 
+    | ExtendTEnvWithModule Id Type TEnv 
+    deriving (Eq, Show)
 
 tmylookup :: Id -> TEnv -> TypeCheckerM Type
 tmylookup _ EmptyTEnv = throwError "mylookup in tenv failed"
@@ -363,7 +365,12 @@ tmylookup var (ExtendTEnv name value oldTenv) =
     if var == name 
         then return value 
         else tmylookup var oldTenv
-
+tmylookup var (ExtendTEnvWithModule mname mType oldEnv) = 
+    if var == mname 
+        then case mType of 
+            (ModuleType _) -> return mType
+            _ -> throwError "value must be ModuleType"
+        else tmylookup var oldEnv 
 
 -- type inference
 
@@ -502,6 +509,13 @@ typeOf expr tEnv subst = case expr of
         Answer (pBodyType, subst1) <- typeOf pBodyExpr (ExtendTEnv bVar bVarType tEnvForLetRecBody) subst 
         subst2 <- unifier pBodyType pResultType subst1 pBodyExpr
         typeOf letRecBodyExpr tEnvForLetRecBody subst2
+    QualifiedVar mName varName -> do 
+        mType <- tmylookup mName tEnv
+        case mType of 
+            ModuleType innerEnv -> do
+                ty <- tmylookup varName innerEnv
+                return $ Answer (ty, subst)
+
 
 
 -- module
@@ -600,6 +614,22 @@ valueOfModuleDefns [] env = return $ env
 valueOfModuleDefns (m@(ModuleDefn mName expectedIFace mBody):xs)  env = do 
     mValue <- valueOfModule m env 
     valueOfModuleDefns xs (ExtendEnv mName mValue env)
+
+-- typeOf Module 
+typeOfProgram :: Program -> TypeCheckerM Answer 
+typeOfProgram (Program mDefs body) = do
+    Answer (ty, subst1) <- typeOfModuleDefns mDefs EmptyTEnv emptySubst
+    case ty of 
+        ModuleType tEnv -> typeOf body tEnv subst1
+        _ -> error "forbiden"
+
+typeOfModuleDefns :: [ModuleDefn] -> TEnv -> Subst -> TypeCheckerM Answer
+typeOfModuleDefns _ _ _ = error "TODO"
+
+typeOfModule :: ModuleDefn -> TypeCheckerM Answer
+typeOfModule _ = error "TODO"
+
+
 
 -- test 
 testInterp s = do 
