@@ -615,6 +615,7 @@ valueOfModuleDefns (m@(ModuleDefn mName expectedIFace mBody):xs)  env = do
     mValue <- valueOfModule m env 
     valueOfModuleDefns xs (ExtendEnv mName mValue env)
 
+
 -- typeOf Module 
 typeOfProgram :: Program -> TypeCheckerM Answer 
 typeOfProgram (Program mDefs body) = do
@@ -624,12 +625,42 @@ typeOfProgram (Program mDefs body) = do
         _ -> error "forbiden"
 
 typeOfModuleDefns :: [ModuleDefn] -> TEnv -> Subst -> TypeCheckerM Answer
-typeOfModuleDefns _ _ _ = error "TODO"
+typeOfModuleDefns mDefns tEnv subst = case mDefns of 
+    [] -> return $ Answer ((ModuleType EmptyTEnv), subst)
+    (moduleDefn@(ModuleDefn mName _ _):rest) -> do 
+        Answer (tyModule, subst1) <- typeOfModule moduleDefn tEnv subst
+        typeOfModuleDefns rest (ExtendTEnv mName tyModule tEnv) subst1
 
-typeOfModule :: ModuleDefn -> TypeCheckerM Answer
-typeOfModule _ = error "TODO"
+-- data ModuleDefn = ModuleDefn Id Iface ModuleBody deriving Show
+typeOfModule :: ModuleDefn -> TEnv -> Subst -> TypeCheckerM Answer
+typeOfModule (ModuleDefn mName mIface mBody) tEnv subst = do 
+    let ifaceEnv = mIface2Env mIface
+    (bodyEnv, subst1) <- mBody2Env mBody tEnv subst
+    satisfy <- bodySatsifyIface bodyEnv ifaceEnv
+    if satisfy
+        then return $ Answer (ModuleType ifaceEnv, subst1)
+        else throwError "bodySatsifyIface check failed"
 
+mIface2Env :: Iface -> TEnv
+mIface2Env (Iface decls) = case decls of 
+    [] -> EmptyTEnv
+    ((Decl name ty):rest) -> ExtendTEnv name ty (mIface2Env (Iface rest))
 
+mBody2Env :: ModuleBody -> TEnv -> Subst -> TypeCheckerM (TEnv, Subst)
+mBody2Env (ModuleBody defns) tEnv subst = case defns of 
+    [] -> return (tEnv, subst)
+    ((Defn name exp):rest) -> do 
+        Answer (ty, subst1) <- typeOf exp tEnv subst
+        mBody2Env (ModuleBody rest) (ExtendTEnv name ty tEnv) subst1
+
+bodySatsifyIface :: TEnv -> TEnv -> TypeCheckerM Bool 
+bodySatsifyIface bodyEnv iFaceEnv = case iFaceEnv of
+    EmptyTEnv -> return True 
+    ExtendTEnv name ty oldEnv -> do
+        tyInBody <- tmylookup name bodyEnv
+        if ty /= tyInBody
+            then return False 
+            else bodySatsifyIface bodyEnv oldEnv
 
 -- test 
 testInterp s = do 
