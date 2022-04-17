@@ -1,3 +1,5 @@
+-- {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
+
 module MyModuleLang where 
 
 import Text.Parsec
@@ -266,7 +268,8 @@ valueOf expr env = case expr of
         x:[] -> valueOf x env
         x:xs -> do 
             valueOf x env 
-            valueOf (Begin xs) env 
+            valueOf (Begin xs) env
+        [] -> error "forbidden" 
     NewRef expr1 -> do 
         value <- valueOf expr1 env 
         store <- get 
@@ -299,6 +302,7 @@ valueOf expr env = case expr of
         value <- mylookup mName env
         case value of 
             MValue mValue -> applyModule mValue varName
+            _ -> error "forbidden"
 -- type 
 data Type
     = IntType
@@ -626,7 +630,7 @@ typeOfProgram (Program mDefs body) = do
 
 typeOfModuleDefns :: [ModuleDefn] -> TEnv -> Subst -> TypeCheckerM Answer
 typeOfModuleDefns mDefns tEnv subst = case mDefns of 
-    [] -> return $ Answer ((ModuleType EmptyTEnv), subst)
+    [] -> return $ Answer ((ModuleType tEnv), subst)
     (moduleDefn@(ModuleDefn mName _ _):rest) -> do 
         Answer (tyModule, subst1) <- typeOfModule moduleDefn tEnv subst
         typeOfModuleDefns rest (ExtendTEnv mName tyModule tEnv) subst1
@@ -690,5 +694,11 @@ testParseProgram s = do
     parse parseProgram "test" s 
 
 
+testTypeOfProg s = do 
+    case parse parseProgram "test" s of 
+       Right prog -> runTypeChecker (typeOfProgram prog) 
+
 test = do 
-    testInterp "module m1 interface [a:int b:bool] body [a = 111 b = zero?(0)] module m2 interface [a:int b:bool] body [a = from m1 take b b = zero?(1)] from m2 take a"
+    -- testInterp "module m1 interface [a:int b:bool] body [a = 111 b = zero?(0)] module m2 interface [a:int b:bool] body [a = from m1 take b b = zero?(1)] from m2 take a"
+    testTypeOfProg "module m1 interface [a: int b:bool] body [a = 1 b=zero?(1)] from m1 take b"
+    -- testInterp "module m1 interface [a: int b:bool] body [a = 1 b=zero?(0)] if from m1 take b then 1 else 2"
