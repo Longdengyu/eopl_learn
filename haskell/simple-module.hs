@@ -640,7 +640,7 @@ typeOfModule :: ModuleDefn -> TEnv -> Subst -> TypeCheckerM Answer
 typeOfModule (ModuleDefn mName mIface mBody) tEnv subst = do 
     let ifaceEnv = mIface2Env mIface
     (bodyEnv, subst1) <- mBody2Env mBody tEnv subst
-    satisfy <- bodySatsifyIface bodyEnv ifaceEnv
+    satisfy <- bodySatsifyIface bodyEnv ifaceEnv -- TODO: catch error
     if satisfy
         then return $ Answer (ModuleType ifaceEnv, subst1)
         else throwError "bodySatsifyIface check failed"
