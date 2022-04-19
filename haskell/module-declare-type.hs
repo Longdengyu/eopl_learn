@@ -40,7 +40,7 @@ type Parser = ParsecT String () Identity
 ident_ :: Parser String 
 ident_ = do 
     x <- letter 
-    xs <- many alphaNum 
+    xs <- many alphaNum
     return (x:xs) 
 
 thetoken p = p <* spaces
@@ -381,6 +381,7 @@ data TEnv
     = EmptyTEnv 
     | ExtendTEnv Id Type TEnv 
     | ExtendTEnvWithModule Id Type TEnv 
+    | ExtendTEnvWithType Type Type TEnv 
     deriving (Eq, Show)
 
 tmylookup :: Id -> TEnv -> TypeCheckerM Type
@@ -563,6 +564,7 @@ data Decl
 parseDecl :: Parser Decl 
 parseDecl = try parseSimpleDecl 
     <|> parseTransparentTypeDecl
+    <|> parseOpaqueTypeDecl
 
 parseSimpleDecl :: Parser Decl 
 parseSimpleDecl = do 
@@ -727,6 +729,21 @@ bodySatsifyIface bodyEnv iFaceEnv = case iFaceEnv of
             then return False 
             else bodySatsifyIface bodyEnv oldEnv
 
+-- type check for opaque type 
+expandType :: Type -> TEnv -> Type 
+expandType ty tEnv = case ty of 
+    IntType -> IntType
+    BoolType -> BoolType 
+    ProcType argType resultType -> ProcType (expandType argType tEnv) (expandType resultType tEnv)
+    NamedType name -> lookupTypeNameInTEnv tEnv name 
+    QualifiedType mName tName -> lookupQualifiedTypeInTEnv mName tName tEnv
+
+lookupTypeNameInTEnv :: TEnv -> Id -> Type 
+lookupTypeNameInTEnv _ _ = error "TODO"
+
+lookupQualifiedTypeInTEnv :: Id -> Id -> TEnv -> Type 
+lookupQualifiedTypeInTEnv _ _ _ = error "TODO"
+
 -- test 
 testInterp s = do 
     case parse parseProgram "test" s of 
@@ -761,9 +778,16 @@ testTypeOfProg s = do
 
 test = do 
     -- testInterp "module m1 interface [a:int b:bool] body [a = 111 b = zero?(0)] module m2 interface [a:int b:bool] body [a = from m1 take b b = zero?(1)] from m2 take a"
-    testTypeOfProg "module m1 interface [a: int b:bool] body [a = 1 b=zero?(1)] from m1 take b"
+    -- testTypeOfProg "module m1 interface [a: int b:bool] body [a = 1 b=zero?(1)] from m1 take b"
     -- testInterp "module m1 interface [a: int b:bool] body [a = 1 b=zero?(0)] if from m1 take b then 1 else 2"
-
+    testParseProgram $ "module tables \
+    \interface [opaque table \
+    \   empty:table \
+    \   addToTable : (int -> (int -> (table -> table))) \
+    \   lookupInTable : (int -> (table -> int))] \
+    \body [type table = (int -> int)] \
+    \let empty = from tables take empty \
+    \in empty"
 --  TODO:
 --     1. OPAQUE-TYPES
 --     2. Transparent Types
